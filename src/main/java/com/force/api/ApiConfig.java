@@ -8,7 +8,7 @@ public class ApiConfig {
 	ApiVersion apiVersion = ApiVersion.DEFAULT_VERSION;
 	String username;
 	String password;
-	String loginEndpoint = "https://login.salesforce.com";
+	String loginEndpoint = "https://test.salesforce.com";
 	String clientId;
 	String clientSecret;
 	String redirectURI;

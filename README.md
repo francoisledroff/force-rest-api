@@ -1,7 +1,7 @@
 # Force.com REST API Connector
 
 Lightweight library for building Force.com apps with OAuth authentication and data access through the Force.com REST API.
-Forked
+Forked from  https://github.com/francoisledroff/force-rest-api itself forked from https://github.com/jesperfj/force-rest-api
 * to replace jackson by gson
 * to make it a felix/osgi bundle
 

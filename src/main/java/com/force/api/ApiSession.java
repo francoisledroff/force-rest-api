@@ -39,6 +39,26 @@ public class ApiSession implements java.io.Serializable {
 		refreshToken = value;
 		return this;
 	}
-	
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+
+        ApiSession that = (ApiSession) o;
+
+        if (!accessToken.equals(that.accessToken)) return false;
+        if (!apiEndpoint.equals(that.apiEndpoint)) return false;
+        if (!refreshToken.equals(that.refreshToken)) return false;
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = accessToken.hashCode();
+        result = 31 * result + apiEndpoint.hashCode();
+        result = 31 * result + refreshToken.hashCode();
+        return result;
+    }
 }

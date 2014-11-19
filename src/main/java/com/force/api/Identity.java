@@ -27,22 +27,20 @@ public class Identity {
 	long utcOffset;
     @SerializedName("last_modified_date") Date lastModifiedDate;
 
-
-
-	
-	public class Status {
+	//gson prefers static for nested class
+	static public class Status {
 
         @SerializedName("created_date")
 		Date createdDate;
 		String body;
-		public Date getCreatedDate() {
+
+        public Date getCreatedDate() {
 			return createdDate;
 		}
 		public String getBody() {
 			return body;
 		}
-
-		public void setCreatedDate(Date createdDate) {
+        		public void setCreatedDate(Date createdDate) {
 			this.createdDate = createdDate;
 		}
 		public void setBody(String body) {

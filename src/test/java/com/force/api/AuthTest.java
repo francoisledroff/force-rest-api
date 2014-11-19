@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
 
+import com.google.gson.Gson;
 import org.junit.Test;
 
 public class AuthTest {
@@ -80,8 +81,9 @@ public class AuthTest {
 			.setApiEndpoint(api.session.apiEndpoint);
 		
 		ForceApi api2 = new ForceApi(c,session);
-		
-		assertEquals(Fixture.get("username"),api2.getIdentity().getUsername());
+		Identity identity = api2.getIdentity();
+        System.out.println(new Gson().toJson(identity));//testing formerly buggy serialization
+		assertEquals(Fixture.get("username"),identity.getUsername());
 		
 	}
 	

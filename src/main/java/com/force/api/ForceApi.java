@@ -4,6 +4,8 @@ import com.force.api.http.Http;
 import com.force.api.http.HttpRequest;
 import com.force.api.http.HttpResponse;
 import com.google.gson.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -28,30 +30,37 @@ import java.util.Map.Entry;
  */
 public class ForceApi {
 
-	final ApiConfig config;
-	ApiSession session;
-	private boolean autoRenew = false;
+    final ApiConfig config;
+    ApiSession session;
+    private boolean autoRenew = false;
+    private ForceApiCallback callback;
 
     final static Gson gson = new GsonBuilder().setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ").create();
+    private final static Logger logger = LoggerFactory.getLogger(ForceApi.class);
 
-	public ForceApi(ApiConfig config, ApiSession session) {
-		this.config = config;
-		this.session = session;
-		if(session.getRefreshToken()!=null) {
-			autoRenew = true;
-		}
-	}
+    public ForceApi(ApiConfig config, ApiSession session) {
+        this.config = config;
+        this.session = session;
+        if(session.getRefreshToken()!=null) {
+            autoRenew = true;
+        }
+    }
 
-	public ForceApi(ApiSession session) {
-		this(new ApiConfig(), session);
-	}
+    public ForceApi(ApiConfig config, ApiSession session, ForceApiCallback callback) {
+        this(config, session);
+        this.callback = callback;
+    }
 
-	public ForceApi(ApiConfig apiConfig) {
-		config = apiConfig;
-		session = Auth.authenticate(apiConfig);
-		autoRenew  = true;
+    public ForceApi(ApiSession session) {
+        this(new ApiConfig(), session);
+    }
 
-	}
+    public ForceApi(ApiConfig apiConfig) {
+        config = apiConfig;
+        session = Auth.authenticate(apiConfig);
+        autoRenew  = true;
+
+    }
 
 
     public Identity getIdentity()
@@ -73,89 +82,98 @@ public class ForceApi {
     }
 
 
-	public ResourceRepresentation getSObject(String type, String id) throws ResourceException {
-		// Should we return null or throw an exception if the record is not found?
-		// Right now will just throw crazy runtimeexception with no explanation
-		return new ResourceRepresentation(apiRequest(new HttpRequest()
-					.url(uriBase()+"/sobjects/"+type+"/"+id)
-					.method("GET")
-					.header("Accept", "application/json")));
-	}
+    public ResourceRepresentation getSObject(String type, String id) throws ResourceException {
+        // Should we return null or throw an exception if the record is not found?
+        // Right now will just throw crazy runtimeexception with no explanation
+        return new ResourceRepresentation(apiRequest(new HttpRequest()
+                .url(uriBase()+"/sobjects/"+type+"/"+id)
+                .method("GET")
+                .header("Accept", "application/json")));
+    }
 
-	public String createSObject(String type, Object sObject) {
+    public String createSObject(String type, Object sObject) {
 
-			// We're trying to keep Http classes clean with no reference to JSON
-			// Therefore, we serialize to bytes before we pass object to HttpRequest().
-			// But it would be nice to have a streaming implementation. We can do that
-			// by using ObjectMapper.writeValue() passing in output stream, but then we have
-			// polluted the Http layer.
+        // We're trying to keep Http classes clean with no reference to JSON
+        // Therefore, we serialize to bytes before we pass object to HttpRequest().
+        // But it would be nice to have a streaming implementation. We can do that
+        // by using ObjectMapper.writeValue() passing in output stream, but then we have
+        // polluted the Http layer.
+        byte[] sObjectAsJsonBytes = gson.toJson(sObject).getBytes();
+        CreateResponse result = gson.fromJson(apiRequest(new HttpRequest()
+                .url(uriBase()+"/sobjects/"+type)
+                .method("POST")
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/json")
+                .expectsCode(201)
+                .content(sObjectAsJsonBytes)).getString(),CreateResponse.class);
+
+        if (result.isSuccess()) {
+            return (result.getId());
+        } else {
+            throw new SObjectException(result.getErrors());
+        }
+
+    }
+
+    public void updateSObject(String type, String id, Object sObject) {
+
+        // See createSObject for note on streaming ambition
+        //update fails when using non-ASCII characters if we do not decode string as UTF-8
+        byte[] sObjectAsJsonBytes = getContentAsByteArray(gson.toJson(sObject));
+        apiRequest(new HttpRequest()
+                .url(uriBase()+"/sobjects/"+type+"/"+id+"?_HttpMethod=PATCH")
+                .method("POST")
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/json; charset=UTF-8")
+                .expectsCode(204)
+                .content(sObjectAsJsonBytes)
+        );
+
+    }
+
+    public void deleteSObject(String type, String id) {
+        apiRequest(new HttpRequest()
+                .url(uriBase()+"/sobjects/"+type+"/"+id)
+                .method("DELETE")
+        );
+    }
+
+    private byte[] getContentAsByteArray(String content) {
+        try {
+            return content.getBytes(Constants.ENCODING_UTF8);
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException("Error while processing content", e);
+        }
+    }
+
+    public CreateOrUpdateResult createOrUpdateSObject(String type, String externalIdField, String externalIdValue, Object sObject) {
+        try {
+            // See createSObject for note on streaming ambition
             byte[] sObjectAsJsonBytes = gson.toJson(sObject).getBytes();
- 			CreateResponse result = gson.fromJson(apiRequest(new HttpRequest()
-					.url(uriBase()+"/sobjects/"+type)
-					.method("POST")
-					.header("Accept", "application/json")
-					.header("Content-Type", "application/json")
-					.expectsCode(201)
-					.content(sObjectAsJsonBytes)).getString(),CreateResponse.class);
+            HttpResponse res =
+                    apiRequest(new HttpRequest()
+                            .url(uriBase()+"/sobjects/"+type+"/"+externalIdField+"/"+URLEncoder.encode(externalIdValue,"UTF-8")+"?_HttpMethod=PATCH")
+                            .method("POST")
+                            .header("Accept", "application/json")
+                            .header("Content-Type", "application/json")
+                            .content(sObjectAsJsonBytes)
+                    );
+            if(res.getResponseCode()==201) {
+                return CreateOrUpdateResult.CREATED;
+            } else if(res.getResponseCode()==204) {
+                return CreateOrUpdateResult.UPDATED;
+            } else {
+                logger.debug("Code: "+res.getResponseCode());
+                logger.debug("Message: "+res.getString());
+                throw new RuntimeException();
+            }
 
-			if (result.isSuccess()) {
-				return (result.getId());
-			} else {
-				throw new SObjectException(result.getErrors());
-			}
+        }  catch (IOException e) {
+            throw new ResourceException(e);
+        }
+    }
 
-	}
-
-	public void updateSObject(String type, String id, Object sObject) {
-
-			// See createSObject for note on streaming ambition
-            byte[] sObjectAsJsonBytes = gson.toJson(sObject).getBytes();
-			apiRequest(new HttpRequest()
-				.url(uriBase()+"/sobjects/"+type+"/"+id+"?_HttpMethod=PATCH")
-				.method("POST")
-				.header("Accept", "application/json")
-				.header("Content-Type", "application/json")
-				.expectsCode(204)
-				.content(sObjectAsJsonBytes)
-			);
-
-	}
-
-	public void deleteSObject(String type, String id) {
-		apiRequest(new HttpRequest()
-			.url(uriBase()+"/sobjects/"+type+"/"+id)
-			.method("DELETE")
-		);
-	}
-
-	public CreateOrUpdateResult createOrUpdateSObject(String type, String externalIdField, String externalIdValue, Object sObject) {
-		try {
-			// See createSObject for note on streaming ambition
-            byte[] sObjectAsJsonBytes = gson.toJson(sObject).getBytes();
-			HttpResponse res =
-				apiRequest(new HttpRequest()
-					.url(uriBase()+"/sobjects/"+type+"/"+externalIdField+"/"+URLEncoder.encode(externalIdValue,"UTF-8")+"?_HttpMethod=PATCH")
-					.method("POST")
-					.header("Accept", "application/json")
-					.header("Content-Type", "application/json")
-					.content(sObjectAsJsonBytes)
-				);
-			if(res.getResponseCode()==201) {
-				return CreateOrUpdateResult.CREATED;
-			} else if(res.getResponseCode()==204) {
-				return CreateOrUpdateResult.UPDATED;
-			} else {
-				System.out.println("Code: "+res.getResponseCode());
-				System.out.println("Message: "+res.getString());
-				throw new RuntimeException();
-			}
-
-		}  catch (IOException e) {
-			throw new ResourceException(e);
-		}
-	}
-
-	public <T> QueryResult<T> query(String query, Class<T> clazz) {
+    public <T> QueryResult<T> query(String query, Class<T> clazz) {
         try {
             return queryAny(uriBase() + "/query/?q=" + URLEncoder.encode(query, "UTF-8"), clazz);
         } catch (UnsupportedEncodingException e) {
@@ -163,9 +181,9 @@ public class ForceApi {
         }
     }
 
-	public QueryResult<Map> query(String query) {
-		return query(query, Map.class);
-	}
+    public QueryResult<Map> query(String query) {
+        return query(query, Map.class);
+    }
 
     public <T> QueryResult<T> queryMore(String nextRecordsUrl, Class<T> clazz) {
         return queryAny(session.getApiEndpoint() + nextRecordsUrl, clazz);
@@ -234,7 +252,7 @@ public class ForceApi {
 
     public DescribeSObject describeSObject(String sobject)
     {
-       return gson.fromJson(apiRequest(new HttpRequest()
+        return gson.fromJson(apiRequest(new HttpRequest()
                 .url(uriBase() + "/sobjects/" + sobject + "/describe")
                 .method("GET")
                 .header("Accept", "application/json")).getString(), DescribeSObject.class);
@@ -242,121 +260,126 @@ public class ForceApi {
     }
 
     private final String uriBase() {
-		return(session.getApiEndpoint()+"/services/data/"+config.getApiVersion());
-	}
-	
-	private final HttpResponse apiRequest(HttpRequest req) {
-		req.setAuthorization("OAuth "+session.getAccessToken());
-		HttpResponse res = Http.send(req);
-		if(res.getResponseCode()==401) {
-			// Perform one attempt to auto renew session if possible
-			if(autoRenew) {
-				System.out.println("Session expired. Refreshing session...");
-				if(session.getRefreshToken()!=null) {
-					session = Auth.refreshOauthTokenFlow(config, session.getRefreshToken());
-				} else {
-					session = Auth.authenticate(config);
-				}
-				req.setAuthorization("OAuth "+session.getAccessToken());
-				res = Http.send(req);
-			}
-		}
-		if(res.getResponseCode()>299) {
-			if(res.getResponseCode()==401) {
-				throw new ApiTokenException(res.getString());
-			} else {
-				throw new ApiException(res.getResponseCode(), res.getString());
-			}
-		} else if(req.getExpectedCode()!=-1 && res.getResponseCode()!=req.getExpectedCode()) {
-			throw new RuntimeException("Unexpected response from Force API. Got response code "+res.getResponseCode()+
-					". Was expecing "+req.getExpectedCode());
-		} else {
-			return res;
-		}
-	}
-	
-	/**
-	 * Normalizes the JSON response in case it contains responses from
-	 * Relationsip queries. For e.g.
-	 * 
-	 * <code>
-	 * Query:
-	 *   select Id,Name,(select Id,Email,FirstName from Contacts) from Account
-	 *   
-	 * Json Response Returned:
-	 * 
-	 * {
-	 *	  "totalSize" : 1,
-	 *	  "done" : true,
-	 *	  "records" : [ {
-	 *	    "attributes" : {
-	 *	      "type" : "Account",
-	 *	      "url" : "/services/data/v24.0/sobjects/Account/0017000000TcinJAAR"
-	 *	    },
-	 *	    "Id" : "0017000000TcinJAAR",
-	 *	    "Name" : "test_acc_04_01",
-	 *	    "Contacts" : {
-	 *	      "totalSize" : 1,
-	 *	      "done" : true,
-	 *	      "records" : [ {
-	 *	        "attributes" : {
-	 *	          "type" : "Contact",
-	 *	          "url" : "/services/data/v24.0/sobjects/Contact/0037000000zcgHwAAI"
-	 *	        },
-	 *	        "Id" : "0037000000zcgHwAAI",
-	 *	        "Email" : "contact@email.com",
-	 *	        "FirstName" : "John"
-	 *	      } ]
-	 *	    }
-	 *	  } ]
-	 *	}
-	 * </code>
-	 * 
-	 * Will get normalized to:
-	 * 
-	 * <code>
-	 * {
-	 *	  "totalSize" : 1,
-	 *	  "done" : true,
-	 *	  "records" : [ {
-	 *	    "attributes" : {
-	 *	      "type" : "Account",
-	 *	      "url" : "/services/data/v24.0/sobjects/Account/accountId"
-	 *	    },
-	 *	    "Id" : "accountId",
-	 *	    "Name" : "test_acc_04_01",
-	 *	    "Contacts" : [ {
-	 *	        "attributes" : {
-	 *	          "type" : "Contact",
-	 *	          "url" : "/services/data/v24.0/sobjects/Contact/contactId"
-	 *	        },
-	 *	        "Id" : "contactId",
-	 *	        "Email" : "contact@email.com",
-	 *	        "FirstName" : "John"
-	 *	    } ]
-	 *	  } ]
-	 *	} 
-	 * </code
-	 * 
-	 * This allows Gson to deserialize the response into it's corresponding Object representation
-	 * 
-	 * @param node 
-	 * @return
-	 */
-	private final JsonObject  normalizeCompositeResponse(JsonObject node){
+        return(session.getApiEndpoint()+"/services/data/"+config.getApiVersion());
+    }
+
+    private final HttpResponse apiRequest(HttpRequest req) {
+        req.setAuthorization("OAuth "+session.getAccessToken());
+        HttpResponse res = Http.send(req);
+        if(res.getResponseCode()==401) {
+            // Perform one attempt to auto renew session if possible
+            if(autoRenew) {
+                logger.debug("Session expired. Refreshing session...");
+                if(session.getRefreshToken()!=null) {
+                    session = Auth.refreshOauthTokenFlow(config, session.getRefreshToken());
+                } else {
+                    session = Auth.authenticate(config);
+                }
+                req.setAuthorization("OAuth "+session.getAccessToken());
+                res = Http.send(req);
+
+                if (callback != null){
+                    callback.execute(session);
+                }
+
+            }
+        }
+        if(res.getResponseCode()>299) {
+            if(res.getResponseCode()==401) {
+                throw new ApiTokenException(res.getString());
+            } else {
+                throw new ApiException(res.getResponseCode(), res.getString());
+            }
+        } else if(req.getExpectedCode()!=-1 && res.getResponseCode()!=req.getExpectedCode()) {
+            throw new RuntimeException("Unexpected response from Force API. Got response code "+res.getResponseCode()+
+                    ". Was expecing "+req.getExpectedCode());
+        } else {
+            return res;
+        }
+    }
+
+    /**
+     * Normalizes the JSON response in case it contains responses from
+     * Relationsip queries. For e.g.
+     *
+     * <code>
+     * Query:
+     *   select Id,Name,(select Id,Email,FirstName from Contacts) from Account
+     *
+     * Json Response Returned:
+     *
+     * {
+     *	  "totalSize" : 1,
+     *	  "done" : true,
+     *	  "records" : [ {
+     *	    "attributes" : {
+     *	      "type" : "Account",
+     *	      "url" : "/services/data/v24.0/sobjects/Account/0017000000TcinJAAR"
+     *	    },
+     *	    "Id" : "0017000000TcinJAAR",
+     *	    "Name" : "test_acc_04_01",
+     *	    "Contacts" : {
+     *	      "totalSize" : 1,
+     *	      "done" : true,
+     *	      "records" : [ {
+     *	        "attributes" : {
+     *	          "type" : "Contact",
+     *	          "url" : "/services/data/v24.0/sobjects/Contact/0037000000zcgHwAAI"
+     *	        },
+     *	        "Id" : "0037000000zcgHwAAI",
+     *	        "Email" : "contact@email.com",
+     *	        "FirstName" : "John"
+     *	      } ]
+     *	    }
+     *	  } ]
+     *	}
+     * </code>
+     *
+     * Will get normalized to:
+     *
+     * <code>
+     * {
+     *	  "totalSize" : 1,
+     *	  "done" : true,
+     *	  "records" : [ {
+     *	    "attributes" : {
+     *	      "type" : "Account",
+     *	      "url" : "/services/data/v24.0/sobjects/Account/accountId"
+     *	    },
+     *	    "Id" : "accountId",
+     *	    "Name" : "test_acc_04_01",
+     *	    "Contacts" : [ {
+     *	        "attributes" : {
+     *	          "type" : "Contact",
+     *	          "url" : "/services/data/v24.0/sobjects/Contact/contactId"
+     *	        },
+     *	        "Id" : "contactId",
+     *	        "Email" : "contact@email.com",
+     *	        "FirstName" : "John"
+     *	    } ]
+     *	  } ]
+     *	}
+     * </code
+     *
+     * This allows Gson to deserialize the response into it's corresponding Object representation
+     *
+     * @param node
+     * @return
+     */
+    private final JsonObject  normalizeCompositeResponse(JsonObject node){
 
         Set<Entry<String, JsonElement>> elements= node.entrySet();
-		JsonObject newNode = new JsonObject();
+        JsonObject newNode = new JsonObject();
         for (Entry<String, JsonElement> currNode : elements)
         {
-			newNode.add(currNode.getKey(),
-						(		currNode.getValue().isJsonObject() &&
-								currNode.getValue().getAsJsonObject().get("records")!=null
-						)?
-                                currNode.getValue().getAsJsonObject().get("records"):
-									currNode.getValue()
-					);
-		}
-		return newNode;
-	}
+            newNode.add(currNode.getKey(),
+                    (		currNode.getValue().isJsonObject() &&
+                            currNode.getValue().getAsJsonObject().get("records")!=null
+                    )?
+                            currNode.getValue().getAsJsonObject().get("records"):
+                            currNode.getValue()
+            );
+        }
+        return newNode;
+    }
 }

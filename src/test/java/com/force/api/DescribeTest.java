@@ -27,23 +27,23 @@ public class DescribeTest {
 
 	@Test
 	public void testDescribeSObject() {
-		DescribeSObject ds = api.describeSObject("Contact");
-		assertEquals("Contact", ds.getName());
+		DescribeSObject ds = api.describeSObject("Apttus_Approval__Approval_Request__c");
+		assertEquals("Apttus_Approval__Approval_Request__c", ds.getName());
 		assertNotNull(ds.getAllFields());
 		assertNotNull(ds.getAllFields().iterator().next().getSoapType());
 	}
 
     @Test
     public void testDiscoverSObject() throws Exception {
-        DiscoverSObject<Contact> ds = api.discoverSObject("Contact", Contact.class);
-        assertEquals("Contact", ds.getObjectDescribe().getName());
+        DiscoverSObject<Contact> ds = api.discoverSObject("Apttus_Approval__Approval_Request__c", Contact.class);
+        assertEquals("Apttus_Approval__Approval_Request__c", ds.getObjectDescribe().getName());
         assertNotNull(ds.getRecentItems());
-        assertTrue(ds.getRecentItems().iterator().next().getId().startsWith("003"));
+//        assertTrue(ds.getRecentItems().iterator().next().getId().startsWith("003"));
     }
 
     @Test
 	public void testGenerateJava() {
-		DescribeSObject ds = api.describeSObject("Contact");
+		DescribeSObject ds = api.describeSObject("Apttus_Approval__Approval_Request__c");
 		PojoCodeGenerator gen = new PojoCodeGenerator();
 		ByteArrayOutputStream s = new ByteArrayOutputStream();
 		try {

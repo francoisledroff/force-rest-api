@@ -1,17 +1,23 @@
 package com.force.api;
 
-public enum ApiVersion {
-	V24 ("v24.0"),
-	V23 ("v23.0"),
-	V22 ("v22.0"), 
-	DEFAULT_VERSION ("v23.0");
+public class  ApiVersion {
 
-	final String v;
+	public static ApiVersion DEFAULT_VERSION = new ApiVersion("v27.0");
+
+	private String value;
 	
-	ApiVersion(String v) {
-		this.v=v;
+	public ApiVersion(String value) {
+		this.value=value;
 	}
-	
-	public String toString() { return v; }
-	
+
+    public String getValue()
+    {
+        return this.value;
+    }
+
+    @Override
+    public String toString()
+    {
+        return this.value;
+    }
 }

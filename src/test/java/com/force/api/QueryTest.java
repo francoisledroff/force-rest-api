@@ -64,7 +64,7 @@ public class QueryTest {
         assertNull(moreResult.getNextRecordsUrl());
     }
 
-    @Test
+//    @Test
 	public void testRelationshipQuery()  {
 		Account a = new Account();
 		a.setName("force-rest-service-test-account");
